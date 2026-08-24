@@ -8,9 +8,7 @@ from plotly.subplots import make_subplots
 def main():
     print("Scaricamento dati dalle API Open-Meteo in corso...")
 
-    # ----------------------------------------------------
-    # 1. DOWNLOAD DATI DA OPEN-METEO API
-    # ----------------------------------------------------
+    # 1. DOWNLOAD DATI
     url_ensemble = (
         "https://ensemble-api.open-meteo.com/v1/ensemble?"
         "latitude=45.4643&longitude=9.1895&"
@@ -30,7 +28,7 @@ def main():
     res_ens = requests.get(url_ensemble).json()
     res_lam = requests.get(url_lam).json()
 
-    # --- ELABORAZIONE DATI ENSEMBLE ---
+    # ELABORAZIONE ENSEMBLE
     hourly_ens = res_ens.get("hourly", {})
     df_ens = pd.DataFrame(hourly_ens)
     if "time" in df_ens.columns:
@@ -39,28 +37,19 @@ def main():
     temp_850_cols = [c for c in df_ens.columns if c.startswith("temperature_850hPa")]
     rain_cols = [c for c in df_ens.columns if c.startswith("rain")]
 
-    # Layout Subplot Plotly
     fig = make_subplots(
-        rows=2, cols=2,
-        column_widths=[0.5, 0.5],
-        row_heights=[0.5, 0.5],
-        specs=[[{"colspan": 2}, None],
-               [{}, {}]],
+        rows=3, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.08,
         subplot_titles=(
-            "Temperatura 850hPa Ensemble (Supermedia, Medie Modelli, Sopramedia e Sottomedia)",
+            "Temp 850hPa (Supermedia, Medie Modelli, Sopra/Sotto media)",
             "% Spaghi con Pioggia ≥ 0.4 mm/h",
-            "Intensità Media Pioggia tra Spaghi Attivi (≥ 0.4 mm/h)"
+            "Intensità Media Pioggia Spaghi Attivi (mm/h)"
         )
     )
 
-    # ----------------------------------------------------
-    # GRAFICO ENSEMBLE 850HPA
-    # ----------------------------------------------------
     model_names = ["gem_global_ensemble", "ecmwf_ifs025_ensemble", "ncep_gefs05", "google_weathernext2_ensemble"]
-
     model_means_list = []
-    p90_list = []
-    p10_list = []
 
     for m in model_names:
         m_cols = [c for c in temp_850_cols if m in c]
@@ -68,50 +57,30 @@ def main():
             m_df = df_ens[m_cols]
             m_mean = m_df.mean(axis=1)
             model_means_list.append(m_mean)
-            p90_list.append(m_df.quantile(0.9, axis=1))
-            p10_list.append(m_df.quantile(0.1, axis=1))
 
-            # MEDIA DI OGNI MODELLO SINGOLO (IN GRIGIO)
             fig.add_trace(go.Scatter(
-                x=df_ens['time'], y=m_mean,
-                mode='lines',
-                name=f'Media {m}',
-                line=dict(color='#64748b', width=1.5),
-                hoverinfo='x+y+name'
+                x=df_ens['time'], y=m_mean, mode='lines',
+                line=dict(color='#64748b', width=1.5)
             ), row=1, col=1)
 
-            # SOPRAMEDIA DI OGNI MODELLO (IN ROSSO)
             fig.add_trace(go.Scatter(
-                x=df_ens['time'], y=m_df.quantile(0.9, axis=1),
-                mode='lines',
-                name=f'Sopramedia (P90) {m}',
-                line=dict(color='#dc2626', width=1.2, dash='dot'),
-                hoverinfo='x+y+name'
+                x=df_ens['time'], y=m_df.quantile(0.9, axis=1), mode='lines',
+                line=dict(color='#dc2626', width=1.2, dash='dot')
             ), row=1, col=1)
 
-            # SOTTOMEDIA DI OGNI MODELLO (IN BLU)
             fig.add_trace(go.Scatter(
-                x=df_ens['time'], y=m_df.quantile(0.1, axis=1),
-                mode='lines',
-                name=f'Sottomedia (P10) {m}',
-                line=dict(color='#2563eb', width=1.2, dash='dash'),
-                hoverinfo='x+y+name'
+                x=df_ens['time'], y=m_df.quantile(0.1, axis=1), mode='lines',
+                line=dict(color='#2563eb', width=1.2, dash='dash')
             ), row=1, col=1)
 
-    # SUPERMEDIA (MEDIA DELLE MEDIE IN NERO PIÙ SPESSA)
     if model_means_list:
         supermedia = pd.concat(model_means_list, axis=1).mean(axis=1)
         fig.add_trace(go.Scatter(
-            x=df_ens['time'], y=supermedia,
-            mode='lines',
-            name='SUPERMEDIA (Media delle Medie)',
-            line=dict(color='#000000', width=4.0),
-            hoverinfo='x+y+name'
+            x=df_ens['time'], y=supermedia, mode='lines',
+            line=dict(color='#000000', width=3.5)
         ), row=1, col=1)
 
-    # ----------------------------------------------------
-    # SOTTO-GRAFICI PIOGGIA ENSEMBLE
-    # ----------------------------------------------------
+    # PIOGGIA
     rain_data = df_ens[rain_cols]
     total_spaghi = rain_data.shape[1]
 
@@ -123,40 +92,31 @@ def main():
         pct_active = pd.Series(0, index=df_ens.index)
         mean_active_rain = pd.Series(0, index=df_ens.index)
 
-    # Sotto-Grafico A: % Spaghi >= 0.4 mm/h
     fig.add_trace(go.Scatter(
-        x=df_ens['time'], y=pct_active,
-        mode='lines', name='% Spaghi ≥ 0.4 mm/h',
-        fill='tozeroy',
-        line=dict(color='#0284c7', width=2),
-        fillcolor='rgba(2, 132, 199, 0.15)'
+        x=df_ens['time'], y=pct_active, mode='lines', fill='tozeroy',
+        line=dict(color='#0284c7', width=2), fillcolor='rgba(2, 132, 199, 0.15)'
     ), row=2, col=1)
 
-    # Sotto-Grafico B: Media mm spaghi attivi
     fig.add_trace(go.Scatter(
-        x=df_ens['time'], y=mean_active_rain,
-        mode='lines', name='Media mm/h (Spaghi Attivi)',
-        fill='tozeroy',
-        line=dict(color='#9333ea', width=2),
-        fillcolor='rgba(147, 51, 234, 0.15)'
-    ), row=2, col=2)
+        x=df_ens['time'], y=mean_active_rain, mode='lines', fill='tozeroy',
+        line=dict(color='#9333ea', width=2), fillcolor='rgba(147, 51, 234, 0.15)'
+    ), row=3, col=1)
 
-    # Styling Plotly Chiaro / Sfondo Bianco (Senza Legenda)
     fig.update_layout(
         template="plotly_white",
         paper_bgcolor='white',
         plot_bgcolor='white',
         font=dict(color="#1e293b", family="Segoe UI, sans-serif"),
-        margin=dict(l=30, r=30, t=50, b=30),
-        height=700,
+        margin=dict(l=20, r=20, t=40, b=20),
+        height=900,
+        width=800,
         showlegend=False
     )
 
-    plotly_html = fig.to_html(full_html=False, include_plotlyjs='cdn')
+    # ESPORTAZIONE COME IMMAGINE STATICA PNG
+    fig.write_image("grafico.png", scale=2)
 
-    # ----------------------------------------------------
-    # 2. ELABORAZIONE SCHEDE SINTETICHE LAM (24H) & ALLERTE
-    # ----------------------------------------------------
+    # 2. ELABORAZIONE SCHEDE LAM
     hourly_lam = res_lam.get("hourly", {})
     df_lam = pd.DataFrame(hourly_lam)
     if "time" in df_lam.columns:
@@ -164,7 +124,6 @@ def main():
 
     lam_models = ["italia_meteo_arpae_icon_2i", "meteofrance_arome_france", "dwd_icon_d2"]
 
-    # A. Temperatura 24h
     temp_cols = [f"temperature_2m_{m}" for m in lam_models if f"temperature_2m_{m}" in df_lam.columns]
     if temp_cols:
         temp_data = df_lam[temp_cols]
@@ -174,7 +133,6 @@ def main():
     else:
         temp_mean_daily, temp_max_avg, temp_min_avg = 0.0, 0.0, 0.0
 
-    # B. Rischio Pioggia 24h
     rain_lam_cols = [f"rain_{m}" for m in lam_models if f"rain_{m}" in df_lam.columns]
     models_with_peak = 0
     total_lam = len(rain_lam_cols)
@@ -187,11 +145,9 @@ def main():
     else:
         risk_rain_pct = 0
 
-    # C. Accumulo Totale & Finestra Temporale
     if rain_lam_cols:
         rain_lam_df = df_lam[rain_lam_cols]
         total_acc_mean = round(rain_lam_df.sum(axis=1).mean(), 1)
-
         avg_hourly_rain = rain_lam_df.mean(axis=1)
         active_hours = df_lam[avg_hourly_rain >= 0.4]['time']
 
@@ -205,7 +161,6 @@ def main():
         total_acc_mean = 0.0
         rain_window = "N/A"
 
-    # D. Indice Turboloso e Shear
     def calc_shear(speed1, dir1, speed2, dir2):
         rad1, rad2 = np.radians(dir1), np.radians(dir2)
         u1, v1 = speed1 * np.sin(rad1), speed1 * np.cos(rad1)
@@ -213,10 +168,8 @@ def main():
         return np.sqrt((u2 - u1)**2 + (v2 - v1)**2)
 
     turb_indices = []
-    max_rain_peak_val = 0.0
-    max_rain_peak_time = "N/A"
-    max_gust_val = 0.0
-    max_gust_time = "N/A"
+    max_rain_peak_val, max_rain_peak_time = 0.0, "N/A"
+    max_gust_val, max_gust_time = 0.0, "N/A"
 
     for m in lam_models:
         cape_col = f"cape_{m}"
@@ -229,16 +182,13 @@ def main():
 
         if cape_col in df_lam.columns:
             cape_max = df_lam[cape_col].max()
-
             sh_1000_850 = calc_shear(df_lam[s1000], df_lam[d1000], df_lam[s850], df_lam[d850])
             sh_850_500 = calc_shear(df_lam[s850], df_lam[d850], df_lam[s500], df_lam[d500])
             shear_tot_max = np.max(sh_1000_850 + sh_850_500)
-
             water_mass_24h = df_lam[r_col].sum()
             idx = (cape_max * shear_tot_max * water_mass_24h) / 100000.0
             turb_indices.append(idx)
 
-        # Picco Pioggia
         if r_col in df_lam.columns:
             r_arr = df_lam[r_col].values
             max_idx = np.argmax(r_arr)
@@ -246,7 +196,6 @@ def main():
                 max_rain_peak_val = r_arr[max_idx]
                 max_rain_peak_time = df_lam['time'].iloc[max_idx].strftime('%H:%M')
 
-        # Picco Raffiche
         if g_col in df_lam.columns:
             g_arr = df_lam[g_col].values
             max_idx = np.argmax(g_arr)
@@ -269,9 +218,6 @@ def main():
         level_code, level_label, level_color = 0, "Livello 0 (Verde)", "#16a34a"
         alert_msg = ""
 
-    # ----------------------------------------------------
-    # 3. TEMPLATE HTML COMPLETO CON SFONDO BIANCO
-    # ----------------------------------------------------
     banner_html = f"""
     <div class="alert-banner alert-lvl-{level_code}">
         <div class="alert-title">{alert_msg}</div>
@@ -296,7 +242,6 @@ def main():
             --text-muted: #64748b;
             --accent-red: #dc2626;
             --accent-blue: #2563eb;
-            --accent-green: #16a34a;
             --border-color: #e2e8f0;
         }}
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
@@ -304,83 +249,87 @@ def main():
             background-color: var(--bg-color);
             color: var(--text-main);
             font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            padding: 24px;
+            padding: 16px;
             display: flex;
             flex-direction: column;
-            gap: 24px;
-            min-height: 100vh;
+            gap: 16px;
+            max-width: 900px;
+            margin: 0 auto;
         }}
-        header {{ text-align: center; padding-bottom: 12px; border-bottom: 1px solid var(--border-color); }}
-        header h1 {{ font-size: 2rem; font-weight: 700; color: #0f172a; }}
+        header {{ text-align: center; padding-bottom: 8px; border-bottom: 1px solid var(--border-color); }}
+        header h1 {{ font-size: 1.6rem; font-weight: 700; color: #0f172a; }}
 
-        .dashboard-grid {{ display: grid; grid-template-columns: 3fr 1fr; gap: 24px; }}
         .plots-container {{
-            background: #ffffff; border-radius: 12px; padding: 16px;
-            border: 1px solid var(--border-color); box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            background: #ffffff; border-radius: 12px; padding: 8px;
+            border: 1px solid var(--border-color); text-align: center;
         }}
-        .cards-container {{ display: flex; flex-direction: column; gap: 16px; }}
+        .plots-container img {{
+            width: 100%;
+            height: auto;
+            border-radius: 8px;
+            display: block;
+        }}
+
+        .cards-container {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }}
         .card {{
-            background: var(--card-bg); border-radius: 12px; padding: 20px;
-            border: 1px solid var(--border-color); box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-            display: flex; flex-direction: column; justify-content: space-between; min-height: 150px;
+            background: var(--card-bg); border-radius: 12px; padding: 14px;
+            border: 1px solid var(--border-color); display: flex; flex-direction: column; justify-content: space-between;
         }}
-        .card-title {{ font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); font-weight: 600; }}
-        .card-main-val {{ font-size: 2.2rem; font-weight: 800; margin: 8px 0; }}
-        .card-subtext {{ font-size: 0.85rem; color: var(--text-muted); }}
-        .temp-sub {{ display: flex; gap: 12px; font-size: 0.95rem; font-weight: 600; }}
+        .card-title {{ font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); font-weight: 600; }}
+        .card-main-val {{ font-size: 1.6rem; font-weight: 800; margin: 4px 0; }}
+        .card-subtext {{ font-size: 0.75rem; color: var(--text-muted); }}
+        .temp-sub {{ display: flex; gap: 8px; font-size: 0.85rem; font-weight: 600; }}
         .temp-max {{ color: var(--accent-red); }}
         .temp-min {{ color: var(--accent-blue); }}
 
         .alert-banner {{
-            border-radius: 12px; padding: 20px 24px; display: flex;
-            justify-content: space-between; align-items: center; color: #ffffff;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            border-radius: 12px; padding: 14px; color: #ffffff;
+            display: flex; flex-direction: column; gap: 6px;
         }}
-        .alert-lvl-1 {{ background: linear-gradient(90deg, #d97706, #f59e0b); color: #fff; }}
-        .alert-lvl-2 {{ background: linear-gradient(90deg, #ea580c, #f97316); }}
-        .alert-lvl-3 {{ background: linear-gradient(90deg, #dc2626, #ef4444); animation: pulse 2s infinite; }}
-        .alert-title {{ font-size: 1.3rem; font-weight: 800; }}
-        .alert-details {{ display: flex; gap: 24px; font-size: 0.95rem; }}
+        .alert-lvl-1 {{ background: #d97706; }}
+        .alert-lvl-2 {{ background: #ea580c; }}
+        .alert-lvl-3 {{ background: #dc2626; }}
+        .alert-title {{ font-size: 1.1rem; font-weight: 800; }}
+        .alert-details {{ font-size: 0.85rem; display: flex; flex-direction: column; gap: 2px; }}
 
-        footer {{ text-align: center; font-size: 0.8rem; color: var(--text-muted); margin-top: auto; padding-top: 12px; }}
-        @keyframes pulse {{ 0% {{ opacity: 1; }} 50% {{ opacity: 0.85; }} 100% {{ opacity: 1; }} }}
-        @media (max-width: 1024px) {{
-            .dashboard-grid {{ grid-template-columns: 1fr; }}
-            .alert-banner {{ flex-direction: column; align-items: flex-start; gap: 12px; }}
-        }}
+        footer {{ text-align: center; font-size: 0.75rem; color: var(--text-muted); margin-top: 12px; }}
     </style>
 </head>
 <body>
     <header><h1>Previsioni Meteo Ciabatta</h1></header>
-    <div class="dashboard-grid">
-        <div class="plots-container">{plotly_html}</div>
-        <div class="cards-container">
-            <div class="card">
-                <div class="card-title">Temperatura 24h</div>
-                <div class="card-main-val">{temp_mean_daily}°C</div>
-                <div class="temp-sub">
-                    <span class="temp-max">Max: {temp_max_avg}°C</span>
-                    <span class="temp-min">Min: {temp_min_avg}°C</span>
-                </div>
-            </div>
-            <div class="card">
-                <div class="card-title">Rischio Pioggia 24h</div>
-                <div class="card-main-val" style="color: #0284c7;">{risk_rain_pct}%</div>
-                <div class="card-subtext">Modelli LAM con picco ≥ 0.4 mm/h</div>
-            </div>
-            <div class="card">
-                <div class="card-title">Accumulo Totale 24h</div>
-                <div class="card-main-val" style="color: #9333ea;">{total_acc_mean} <span style="font-size: 1rem;">mm</span></div>
-                <div class="card-subtext">Finestra: <b>{rain_window}</b></div>
-            </div>
-            <div class="card">
-                <div class="card-title">Indice Turboloso</div>
-                <div class="card-main-val" style="color: {level_color};">{final_turb_index:.1f}</div>
-                <div class="card-subtext">Stato: <b style="color: {level_color};">{level_label}</b></div>
+    
+    <div class="cards-container">
+        <div class="card">
+            <div class="card-title">Temperatura 24h</div>
+            <div class="card-main-val">{temp_mean_daily}°C</div>
+            <div class="temp-sub">
+                <span class="temp-max">Max: {temp_max_avg}°C</span>
+                <span class="temp-min">Min: {temp_min_avg}°C</span>
             </div>
         </div>
+        <div class="card">
+            <div class="card-title">Rischio Pioggia 24h</div>
+            <div class="card-main-val" style="color: #0284c7;">{risk_rain_pct}%</div>
+            <div class="card-subtext">Modelli LAM ≥ 0.4 mm/h</div>
+        </div>
+        <div class="card">
+            <div class="card-title">Accumulo Totale 24h</div>
+            <div class="card-main-val" style="color: #9333ea;">{total_acc_mean} <span style="font-size: 0.9rem;">mm</span></div>
+            <div class="card-subtext">Finestra: <b>{rain_window}</b></div>
+        </div>
+        <div class="card">
+            <div class="card-title">Indice Turboloso</div>
+            <div class="card-main-val" style="color: {level_color};">{final_turb_index:.1f}</div>
+            <div class="card-subtext">Stato: <b style="color: {level_color};">{level_label}</b></div>
+        </div>
     </div>
+
     {banner_html}
+
+    <div class="plots-container">
+        <img src="grafico.png" alt="Grafici Meteo Ensemble">
+    </div>
+
     <footer>Dati forniti da Open-Meteo API</footer>
 </body>
 </html>
@@ -389,8 +338,7 @@ def main():
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(html_content)
 
-    print("File index.html generato con successo.")
+    print("Immagine grafico.png e file index.html generati con successo.")
 
 if __name__ == "__main__":
     main()
-
