@@ -1,0 +1,35 @@
+name: Aggiorna Dashboard Meteo
+
+on:
+  schedule:
+    - cron: '0 2,8,14,20 * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Configura Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Installa librerie
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pandas numpy plotly
+
+      - name: Esegui lo script
+        run: python script.py
+
+      - name: Pubblica su GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+
