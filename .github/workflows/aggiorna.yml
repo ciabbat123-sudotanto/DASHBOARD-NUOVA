@@ -1,9 +1,9 @@
 name: Aggiorna Dashboard Meteo
 
 on:
-  schedule:
-    - cron: '0 2,8,14,20 * * *'
   workflow_dispatch:
+  schedule:
+    - cron: '53 5,11,17,23 * * *'
 
 jobs:
   build:
