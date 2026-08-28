@@ -80,7 +80,7 @@ def main():
             line=dict(color='#000000', width=3.5)
         ), row=1, col=1)
 
-    # PIOGGIA
+    # PIOGGIA ENSEMBLE
     rain_data = df_ens[rain_cols]
     total_spaghi = rain_data.shape[1]
 
@@ -113,7 +113,6 @@ def main():
         showlegend=False
     )
 
-    # ESPORTAZIONE COME IMMAGINE STATICA PNG
     fig.write_image("grafico.png", scale=2)
 
     # 2. ELABORAZIONE SCHEDE LAM
@@ -124,6 +123,7 @@ def main():
 
     lam_models = ["italia_meteo_arpae_icon_2i", "meteofrance_arome_france", "dwd_icon_d2"]
 
+    # TEMPERATURA 2M
     temp_cols = [f"temperature_2m_{m}" for m in lam_models if f"temperature_2m_{m}" in df_lam.columns]
     if temp_cols:
         temp_data = df_lam[temp_cols]
@@ -133,61 +133,50 @@ def main():
     else:
         temp_mean_daily, temp_max_avg, temp_min_avg = 0.0, 0.0, 0.0
 
+    # PRECIPITAZIONI LAM
     rain_lam_cols = [f"rain_{m}" for m in lam_models if f"rain_{m}" in df_lam.columns]
-    models_with_peak = 0
     total_lam = len(rain_lam_cols)
 
     if total_lam > 0:
-        for c in rain_lam_cols:
-            if (df_lam[c] >= 0.4).any():
-                models_with_peak += 1
-        risk_rain_pct = int((models_with_peak / total_lam) * 100)
-    else:
-        risk_rain_pct = 0
-
-    if rain_lam_cols:
         rain_lam_df = df_lam[rain_lam_cols]
-        total_acc_mean = round(rain_lam_df.sum(axis=1).mean(), 1)
-        avg_hourly_rain = rain_lam_df.mean(axis=1)
-        active_hours = df_lam[avg_hourly_rain >= 0.4]['time']
+        
+        # 1. Rischio Pioggia 24h (% modelli con picco >= 0.4 mm/h)
+        models_with_peak = sum((rain_lam_df[c] >= 0.4).any() for c in rain_lam_cols)
+        risk_rain_pct = int((models_with_peak / total_lam) * 100)
 
-        if not active_hours.empty:
-            first_hour = active_hours.iloc[0].strftime('%H:%M')
-            last_hour = active_hours.iloc[-1].strftime('%H:%M')
+        # 2. Accumulo Totale 24h: Media dell'accumulo totale giornaliero dei modelli
+        total_acc_mean = round(rain_lam_df.sum(axis=0).mean(), 1)
+
+        # 3. Finestra Temporale: Considera tutte le ore in cui ALMENO UN MODELLO vede pioggia >= 0.1 mm/h
+        active_hours_mask = (rain_lam_df >= 0.1).any(axis=1)
+        active_times = df_lam.loc[active_hours_mask, 'time']
+
+        if not active_times.empty:
+            first_hour = active_times.iloc[0].strftime('%H:%M')
+            last_hour = active_times.iloc[-1].strftime('%H:%M')
             rain_window = f"{first_hour} - {last_hour}"
         else:
             rain_window = "Nessuna precipitazione"
     else:
+        risk_rain_pct = 0
         total_acc_mean = 0.0
         rain_window = "N/A"
 
+    # CALCOLO SHEAR VENTO
     def calc_shear(speed1, dir1, speed2, dir2):
         rad1, rad2 = np.radians(dir1), np.radians(dir2)
         u1, v1 = speed1 * np.sin(rad1), speed1 * np.cos(rad1)
         u2, v2 = speed2 * np.sin(rad2), speed2 * np.cos(rad2)
         return np.sqrt((u2 - u1)**2 + (v2 - v1)**2)
 
-    turb_indices = []
+    # INDICE TURBOLOSO ORARIO & PICCHI MAX
+    hourly_turb_list = []
     max_rain_peak_val, max_rain_peak_time = 0.0, "N/A"
     max_gust_val, max_gust_time = 0.0, "N/A"
 
     for m in lam_models:
-        cape_col = f"cape_{m}"
         r_col = f"rain_{m}"
         g_col = f"wind_gusts_10m_{m}"
-
-        s1000, d1000 = f"wind_speed_1000hPa_{m}", f"wind_direction_1000hPa_{m}"
-        s850, d850 = f"wind_speed_850hPa_{m}", f"wind_direction_850hPa_{m}"
-        s500, d500 = f"wind_speed_500hPa_{m}", f"wind_direction_500hPa_{m}"
-
-        if cape_col in df_lam.columns:
-            cape_max = df_lam[cape_col].max()
-            sh_1000_850 = calc_shear(df_lam[s1000], df_lam[d1000], df_lam[s850], df_lam[d850])
-            sh_850_500 = calc_shear(df_lam[s850], df_lam[d850], df_lam[s500], df_lam[d500])
-            shear_tot_max = np.max(sh_1000_850 + sh_850_500)
-            water_mass_24h = df_lam[r_col].sum()
-            idx = (cape_max * shear_tot_max * water_mass_24h) / 100000.0
-            turb_indices.append(idx)
 
         if r_col in df_lam.columns:
             r_arr = df_lam[r_col].values
@@ -203,8 +192,30 @@ def main():
                 max_gust_val = g_arr[max_idx]
                 max_gust_time = df_lam['time'].iloc[max_idx].strftime('%H:%M')
 
-    final_turb_index = float(np.mean(turb_indices)) if turb_indices else 0.0
+        cape_col = f"cape_{m}"
+        s1000, d1000 = f"wind_speed_1000hPa_{m}", f"wind_direction_1000hPa_{m}"
+        s850, d850 = f"wind_speed_850hPa_{m}", f"wind_direction_850hPa_{m}"
+        s500, d500 = f"wind_speed_500hPa_{m}", f"wind_direction_500hPa_{m}"
 
+        if cape_col in df_lam.columns and s1000 in df_lam.columns:
+            cape_hourly = df_lam[cape_col].values
+            sh_1000_850 = calc_shear(df_lam[s1000], df_lam[d1000], df_lam[s850], df_lam[d850])
+            sh_850_500 = calc_shear(df_lam[s850], df_lam[d850], df_lam[s500], df_lam[d500])
+            shear_tot_hourly = (sh_1000_850 + sh_850_500).values
+            rain_hourly = df_lam[r_col].values
+            
+            # Calcolo orario dell'indice turboloso
+            idx_hourly = (cape_hourly * shear_tot_hourly * rain_hourly) / 100.0
+            hourly_turb_list.append(idx_hourly)
+
+    if hourly_turb_list:
+        # Media tra i modelli per ciascuna ora, poi si prende il PICCO MASSIMO ORARIO
+        hourly_turb_means = np.mean(np.array(hourly_turb_list), axis=0)
+        final_turb_index = round(float(np.max(hourly_turb_means)), 1)
+    else:
+        final_turb_index = 0.0
+
+    # SOGLIE ALLERTA
     if final_turb_index >= 20:
         level_code, level_label, level_color = 3, "Livello 3 (Rosso)", "#dc2626"
         alert_msg = "ATTENZIONE TEMPORALI FORTI!"
