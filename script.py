@@ -171,7 +171,7 @@ def main():
         u2, v2 = speed2 * np.sin(rad2), speed2 * np.cos(rad2)
         return np.sqrt((u2 - u1)**2 + (v2 - v1)**2)
 
-    # PICCHI MAX E INDICE TURBOLOSO
+    # PICCHI MAX
     max_rain_peak_val, max_rain_peak_time = 0.0, "N/A"
     max_gust_val, max_gust_time = 0.0, "N/A"
 
@@ -187,10 +187,8 @@ def main():
         max_gust_val = max_g_per_hour.loc[max_idx_g]
         max_gust_time = df_lam['time'].loc[max_idx_g].strftime('%H:%M')
 
-    # Calcolo Indice Turboloso Orario
-    hourly_turb_list = []
-    
-    # Estraiamo i suffissi dei modelli presenti per cape
+    # CALCOLO INDICE TURBOLOSO (CORRETTO)
+    all_turb_values = []
     suffixes = [c.replace("cape_", "") for c in cape_cols]
 
     for suf in suffixes:
@@ -201,31 +199,35 @@ def main():
         s500, d500 = f"wind_speed_500hPa_{suf}", f"wind_direction_500hPa_{suf}"
 
         if c_col in df_lam.columns and r_col in df_lam.columns and s1000 in df_lam.columns:
+            # 1. Pioggia totale cumulata delle 24h per QUESTO specifico modello
+            model_total_rain = df_lam[r_col].sum()
+
+            # 2. Dati orari (24 valori)
             cape_hourly = df_lam[c_col].values
             sh_1000_850 = calc_shear(df_lam[s1000], df_lam[d1000], df_lam[s850], df_lam[d850])
             sh_850_500 = calc_shear(df_lam[s850], df_lam[d850], df_lam[s500], df_lam[d500])
             shear_tot_hourly = (sh_1000_850 + sh_850_500).values
-            rain_hourly = df_lam[r_col].values
-            
-            idx_hourly = (cape_hourly * shear_tot_hourly * rain_hourly) / 100.0
-            hourly_turb_list.append(idx_hourly)
 
-    if hourly_turb_list:
-        hourly_turb_means = np.mean(np.array(hourly_turb_list), axis=0)
-        final_turb_index = round(float(np.max(hourly_turb_means)), 1)
+            # 3. Calcolo orario per il modello: (CAPE_ora * SHEAR_ora * PIOGGIA_TOTALE_MODELLO) / 100000
+            idx_hourly = (cape_hourly * shear_tot_hourly * model_total_rain) / 100000.0
+            all_turb_values.extend(idx_hourly)
+
+    # 4. Massimo assoluto tra i 72 valori (24 ore x 3 modelli)
+    if all_turb_values:
+        final_turb_index = round(float(np.max(all_turb_values)), 1)
     else:
         final_turb_index = 0.0
 
-    # SOGLIE ALLERTA AGGIORNATE
-    if final_turb_index >= 15.0:
+    # LE TUE SOGLIE ORIGINAL
+    if final_turb_index >= 20.0:
         level_code, level_label, level_color = 3, "Livello 3 (Rosso)", "#dc2626"
-        alert_msg = "ATTENZIONE TEMPORALI FORTI!"
-    elif final_turb_index >= 8.0:
+        alert_msg = "ATTENZIONE TEMPORALI FORTISSIMI!"
+    elif final_turb_index >= 10.0:
         level_code, level_label, level_color = 2, "Livello 2 (Arancione)", "#ea580c"
-        alert_msg = "Previsti temporali moderati!"
-    elif final_turb_index >= 3.0:
+        alert_msg = "Previsti temporali forti!"
+    elif final_turb_index >= 5.0:
         level_code, level_label, level_color = 1, "Livello 1 (Giallo)", "#d97706"
-        alert_msg = "Previsti temporali!"
+        alert_msg = "Possibili temporali!"
     else:
         level_code, level_label, level_color = 0, "Livello 0 (Verde)", "#16a34a"
         alert_msg = ""
@@ -354,4 +356,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
